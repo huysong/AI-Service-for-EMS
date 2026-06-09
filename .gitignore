@@ -1,0 +1,22 @@
+# .gitignore
+# Bộ đệm của Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Môi trường ảo (nếu bạn có dùng)
+venv/
+.venv/
+env/
+
+# File cấu hình bảo mật (Mật khẩu DB, Secret Key)
+.env
+
+# Cấu hình của VS Code
+.vscode/
+
+# khác
+*.txt
+*.wav
+*.mp3
+*.m4a
