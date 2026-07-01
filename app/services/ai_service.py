@@ -1,7 +1,9 @@
 # app/services/ai_service.py
 import os
+import json
 import tempfile
 import logging
+
 import re
 from typing import Dict, Any, List
 
@@ -30,32 +32,33 @@ def init_ai_models():
         from faster_whisper import WhisperModel
         logger.info("Đang tải mô hình faster-whisper (base)...")
         # Chạy trên CPU với float32 (an toàn, nhẹ và không yêu cầu GPU)
-        _whisper_model = WhisperModel("base", device="cpu", compute_type="float32")
+        _whisper_model = WhisperModel("medium", device="cpu", compute_type="int8")
         logger.info("Tải faster-whisper thành công!")
     except Exception as e:
         logger.error(f"Lỗi khi tải faster-whisper: {str(e)}")
         _whisper_model = None
 
-    # 2. Khởi tạo Zero-shot Classifier (phân loại khẩn cấp tiếng Việt)
-    try:
-        from transformers import pipeline
-        logger.info("Đang tải mô hình Zero-shot Classifier (mDeBERTa-v3-base-2mil7)...")
-        # mDeBERTa-v3-base-xnli-multilingual-nli-2mil7 hỗ trợ tiếng Việt rất tốt mà không cần train lại
-        _zero_shot_classifier = pipeline(
-            "zero-shot-classification", 
-            model="MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7",
-            device=-1 # CPU
-        )
-        logger.info("Tải Zero-shot Classifier thành công!")
-    except Exception as e:
-        logger.error(f"Lỗi khi tải Zero-shot Classifier: {str(e)}")
-        _zero_shot_classifier = None
+    # 2A. Khởi tạo Zero-shot Classifier (phân loại khẩn cấp tiếng Việt) bằng BERT
+    # try:
+    #     from transformers import pipeline
+    #     logger.info("Đang tải mô hình Zero-shot Classifier (mDeBERTa-v3-base-2mil7)...")
+    #     # mDeBERTa-v3-base-xnli-multilingual-nli-2mil7 hỗ trợ tiếng Việt rất tốt mà không cần train lại
+    #     _zero_shot_classifier = pipeline(
+    #         "zero-shot-classification", 
+    #         model="MoritzLaurer/mDeBERTa-v3-base-xnli-multilingual-nli-2mil7",
+    #         device=-1 # CPU
+    #     )
+    #     logger.info("Tải Zero-shot Classifier thành công!")
+    # except Exception as e:
+    #     logger.error(f"Lỗi khi tải Zero-shot Classifier: {str(e)}")
+    #     _zero_shot_classifier = None
 
-    _models_loaded = True
+    # _models_loaded = True
+
 
 
 # --- HỆ THỐNG PHÂN LOẠI DỰ PHÒNG BẰNG TỪ KHÓA (KEYWORD-BASED FALLBACK) ---
-# Thêm các lỗi chính tả đồng âm thường gặp khi Whisper dịch tiếng Việt giọng vùng miền hoặc robot TTS
+
 KEYWORDS_MAP = {
     "CRITICAL": [
         r"ngừng thở", r"ngưng thở", r"ngừng tim", r"ngưng tim", r"gãy cổ", 
@@ -140,29 +143,104 @@ class AIService:
             ai_urgency = "LOW"
             ai_confidence = 50.0
 
-            if _zero_shot_classifier is not None and transcript.strip():
-                try:
-                    logger.info("Đang phân tích mức độ khẩn cấp bằng AI Classifier...")
-                    labels_mapping = {
-                        "nguy hiểm tính mạng cấp bách": "CRITICAL",
-                        "cấp cứu khẩn cấp nguy hiểm": "HIGH",
-                        "cần hỗ trợ y tế trung bình": "MEDIUM",
-                        "không khẩn cấp hoặc gọi thử máy": "LOW"
-                    }
-                    candidate_labels = list(labels_mapping.keys())
+            # if _zero_shot_classifier is not None and transcript.strip():
+            #     try:
+            #         logger.info("Đang phân tích mức độ khẩn cấp bằng AI Classifier...")
+            #         labels_mapping = {
+            #             "nguy hiểm tính mạng cấp bách": "CRITICAL",
+            #             "cấp cứu khẩn cấp nguy hiểm": "HIGH",
+            #             "cần hỗ trợ y tế trung bình": "MEDIUM",
+            #             "không khẩn cấp hoặc gọi thử máy": "LOW"
+            #         }
+            #         candidate_labels = list(labels_mapping.keys())
                     
-                    res = _zero_shot_classifier(
-                        transcript,
-                        candidate_labels=candidate_labels,
-                        hypothesis_template="Nội dung cuộc gọi này thuộc diện {}."
+            #         res = _zero_shot_classifier(
+            #             transcript,
+            #             candidate_labels=candidate_labels,
+            #             hypothesis_template="Nội dung cuộc gọi này thuộc diện {}."
+            #         )
+                    
+            #         best_label = res["labels"][0]
+            #         ai_urgency = labels_mapping[best_label]
+            #         ai_confidence = round(res["scores"][0] * 100, 2)
+            #         logger.info(f"AI Model phân loại: {ai_urgency} ({ai_confidence}%)")
+            #     except Exception as classify_err:
+            #         logger.error(f"Lỗi phân loại bằng AI Model: {str(classify_err)}")
+
+                        # --- ĐOẠN CODE MỚI: GỌI LM STUDIO (API TƯƠNG THÍCH OPENAI) ---
+            ai_urgency = "LOW"
+            ai_confidence = 95.0
+            
+            if transcript.strip():
+                try:
+                    logger.info("Đang gửi yêu cầu phân tích sang LM Studio...")
+                    import httpx
+                    
+                    system_prompt = (
+                        "Bạn là bác sĩ tổng đài điều phối cấp cứu 115 Việt Nam. "
+                        "Hãy đọc đoạn hội thoại của người dân và phân tích tình trạng cấp cứu. "
+                        "Chỉ trả về kết quả ở định dạng JSON duy nhất với cấu trúc sau:\n"
+                        "{\n"
+                        '  "urgency": "CRITICAL" hoặc "HIGH" hoặc "MEDIUM" hoặc "LOW",\n'
+                        '  "symptoms": ["triệu chứng 1", "triệu chứng 2"],\n'
+                        '  "equipment": ["thiết bị gợi ý 1", "thiết bị gợi ý 2"],\n'
+                        '  "service_type": "MED_ACCIDENT" hoặc "MED_CARDIAC" hoặc "MED_STROKE" hoặc "MED_GENERAL"\n'
+                        "}"
                     )
                     
-                    best_label = res["labels"][0]
-                    ai_urgency = labels_mapping[best_label]
-                    ai_confidence = round(res["scores"][0] * 100, 2)
-                    logger.info(f"AI Model phân loại: {ai_urgency} ({ai_confidence}%)")
-                except Exception as classify_err:
-                    logger.error(f"Lỗi phân loại bằng AI Model: {str(classify_err)}")
+                    # Gọi API chuẩn Chat Completion của OpenAI tương thích với LM Studio
+                    payload = {
+                        "model": "local-model", # LM Studio tự động nhận diện model đang load
+                        "messages": [
+                            {"role": "system", "content": system_prompt},
+                            {"role": "user", "content": f"Phân tích cuộc gọi này: {transcript}"}
+                        ],
+                        "temperature": 0.1, # Đặt thấp để mô hình trả về chính xác, không sáng tạo lung tung
+                        "max_tokens": 400 
+                    }
+
+                    
+                    with httpx.Client() as client:
+                        response = client.post(
+                            "http://localhost:1234/v1/chat/completions",
+                            json=payload,
+                            headers={"Content-Type": "application/json"},
+                            timeout=60.0
+                        )
+                        
+                        if response.status_code != 200:
+                            raise Exception(f"LM Studio API trả về lỗi {response.status_code}: {response.text}")
+                            
+                        # Trích xuất văn bản JSON từ câu trả lời của mô hình
+                        response_json = response.json()
+                        content_str = response_json["choices"][0]["message"]["content"].strip()
+                        
+                        # HÀM TRÍCH XUẤT JSON MẠNH MẼ (Đề phòng LLM tự ý chèn thẻ ```json ... ```)
+                        try:
+                            result_json = json.loads(content_str)
+                        except json.JSONDecodeError:
+                            # Tìm dấu ngoặc {} đầu tiên và cuối cùng để trích xuất JSON
+                            start_idx = content_str.find("{")
+                            end_idx = content_str.rfind("}")
+                            if start_idx != -1 and end_idx != -1:
+                                result_json = json.loads(content_str[start_idx:end_idx+1])
+                            else:
+                                raise ValueError("Không tìm thấy cấu trúc JSON hợp lệ trong phản hồi.")
+                        
+                        # Đọc kết quả phân tích
+                        ai_urgency = result_json.get("urgency", "LOW")
+                        extracted_symptoms = result_json.get("symptoms", [])
+                        suggested_equipment = result_json.get("equipment", [])
+                        service_type_code = result_json.get("service_type", "MED_GENERAL")
+                        logger.info(f"LM Studio phân loại thành công: {ai_urgency}")
+                        
+                except Exception as lm_err:
+                    logger.error(f"Lỗi khi kết nối đến LM Studio: {str(lm_err)}")
+                    if 'content_str' in locals() and content_str:
+                        logger.error(f"Nội dung thô nhận được từ LM Studio là: \n{content_str}")
+                    # Nếu LM Studio lỗi hoặc tắt, tự động chạy bộ luật từ khóa Regex dự phòng bên dưới
+
+
 
             # 3. Phân loại dự phòng bằng Từ khóa (Rule-based Fallback)
             fallback_res = rule_based_urgency_classify(transcript)
