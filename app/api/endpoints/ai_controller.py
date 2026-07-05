@@ -2,6 +2,7 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 from app.schemas.ai_analysis import AIAnalysisResult
 from app.services.ai_service import ai_service
+import uuid
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from app.services.ai_service import ai_service
@@ -35,7 +36,8 @@ async def analyze_emergency_call(
 
         audio_bytes = await file.read()
         
-        result = await ai_service.analyze_voice_call(audio_bytes)
+        request_id = str(uuid.uuid4())
+        result = await ai_service.analyze_voice_call(audio_bytes, request_id=request_id)
         return result
         
     except Exception as e:

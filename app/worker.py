@@ -4,6 +4,7 @@ import json
 import logging
 import httpx
 import os
+import uuid
 from redis import Redis
 from dotenv import load_dotenv
 
@@ -35,15 +36,16 @@ async def download_audio(url: str) -> bytes:
             raise Exception(f"Không thể tải file âm thanh. HTTP status: {response.status_code}")
         return response.content
 
-async def send_callback(call_id: int, transcript: str, urgency: str, confidence: float):
+async def send_callback(call_id: int, transcript: str, urgency: str, confidence: float, symptoms: list):
     """
     Gửi kết quả phân tích AI ngược lại Spring Boot qua HTTP POST Callback
     """
     payload = {
         "call_id": call_id,
-        "ai_transcript": transcript,
-        "ai_urgency_prediction": urgency,
-        "ai_confidence_score": confidence
+        "transcript": transcript,
+        "urgency": urgency,
+        "confidence": confidence,
+        "symptoms": symptoms
     }
     
     async with httpx.AsyncClient() as client:
@@ -79,19 +81,27 @@ async def process_queue():
                     logger.warning("Tin nhắn thiếu trường dữ liệu 'call_id' hoặc 'audio_url'. Bỏ qua.")
                     continue
                 
+                request_id = str(uuid.uuid4())
+                
                 # 1. Tải audio file
                 audio_bytes = await download_audio(audio_url)
                 
                 # 2. Chạy dịch và phân loại bằng AI
-                result = await ai_service.analyze_voice_call(audio_bytes)
+                result = await ai_service.analyze_voice_call(
+                    audio_bytes,
+                    call_id=call_id,
+                    request_id=request_id
+                )
                 
                 # 3. Gửi callback cập nhật dữ liệu về Spring Boot
                 await send_callback(
                     call_id=call_id,
-                    transcript=result.ai_transcript,
-                    urgency=result.ai_urgency_prediction,
-                    confidence=result.ai_confidence_score
+                    transcript=result.transcript,
+                    urgency=result.urgency,
+                    confidence=result.confidence,
+                    symptoms=result.symptoms
                 )
+
                 
         except Exception as e:
             logger.error(f"Lỗi trong vòng lặp Worker: {str(e)}", exc_info=True)

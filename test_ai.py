@@ -32,15 +32,13 @@ async def test_real_audio_scenarios():
             with open(filepath, "rb") as f:
                 audio_bytes = f.read()
 
-            result = await ai_service.analyze_voice_call(audio_bytes)
+            result = await ai_service.analyze_voice_call(audio_bytes, call_id=999, request_id="TEST-REQ-123")
             
             print(f"=== RESULT FOR {filename} ===")
-            print(f"Transcript: \"{result.ai_transcript}\"")
-            print(f"Urgency: {result.ai_urgency_prediction} (Expected: {expected_level})")
-            print(f"Confidence: {result.ai_confidence_score}%")
-            print(f"Service Type: {result.service_type_code}")
-            print(f"Symptoms: {result.extracted_symptoms}")
-            print(f"Equipment: {result.suggested_equipment}")
+            print(f"Transcript: \"{result.transcript}\"")
+            print(f"Urgency: {result.urgency} (Expected: {expected_level})")
+            print(f"Confidence: {result.confidence}%")
+            print(f"Symptoms: {result.symptoms}")
             
         except Exception as e:
             print(f"[ERROR] Failed to process {filename}: {str(e)}")
