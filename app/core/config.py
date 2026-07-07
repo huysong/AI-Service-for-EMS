@@ -14,6 +14,9 @@ class Settings(BaseSettings):
     LMSTUDIO_MAX_TOKENS: int = 1000
     CONFIDENCE_THRESHOLD: float = 60.0
     PROMPT_FILE_PATH: str = "app/prompts/triage_system_prompt.txt"
+    AI_API_KEY: str = "ems-cad-ai-secret-key-123456"
+    SPRING_BOOT_CALLBACK_KEY: str = "ems-cad-callback-secret-key-789012"
+
 
     @property
     def ASYNC_DATABASE_URL(self) -> str:

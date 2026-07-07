@@ -40,6 +40,8 @@ async def send_callback(call_id: int, transcript: str, urgency: str, confidence:
     """
     Gửi kết quả phân tích AI ngược lại Spring Boot qua HTTP POST Callback
     """
+    from app.core.config import settings
+    
     payload = {
         "call_id": call_id,
         "transcript": transcript,
@@ -48,12 +50,18 @@ async def send_callback(call_id: int, transcript: str, urgency: str, confidence:
         "symptoms": symptoms
     }
     
+    headers = {
+        "Content-Type": "application/json",
+        "X-Callback-Key": settings.SPRING_BOOT_CALLBACK_KEY
+    }
+    
     async with httpx.AsyncClient() as client:
         logger.info(f"Đang gửi callback kết quả cho cuộc gọi {call_id} về Spring Boot...")
-        response = await client.post(SPRING_BOOT_CALLBACK_URL, json=payload)
+        response = await client.post(SPRING_BOOT_CALLBACK_URL, json=payload, headers=headers)
         logger.info(f"Phản hồi từ Spring Boot: {response.status_code}")
         if response.status_code not in (200, 204):
             logger.error(f"Gửi callback thất bại. Chi tiết: {response.text}")
+
 
 async def process_queue():
     """

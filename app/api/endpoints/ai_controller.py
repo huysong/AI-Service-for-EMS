@@ -7,14 +7,24 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import text
 from app.services.ai_service import ai_service
 from app.core.database import get_db
-
+from fastapi.security import APIKeyHeader
+from app.core.config import settings
 
 router = APIRouter()
 
-@router.post("/analyze-call", response_model=AIAnalysisResult)
+api_key_header = APIKeyHeader(name="X-API-Key", auto_error=True)
+
+async def verify_api_key(api_key: str = Depends(api_key_header)):
+    if api_key != settings.AI_API_KEY:
+        raise HTTPException(
+            status_code=401,
+            detail="Yêu cầu bị từ chối: API Key không hợp lệ"
+        )
+
+@router.post("/analyze-call", response_model=AIAnalysisResult, dependencies=[Depends(verify_api_key)])
 async def analyze_emergency_call(
     file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db) # kết nối DB
+    db: AsyncSession = Depends(get_db)
 ):
     try:
 
