@@ -21,25 +21,33 @@ class TriageService:
         Orchestrates speech-to-text, LLM classification, fallback checks,
         and logs performance metrics.
         """
-        start_time = time.time()
+        total_start = time.perf_counter()
+
         logger.info(f"Bắt đầu phân tích cuộc gọi. RequestId: {request_id}, EmergencyCallId: {call_id}")
 
-        # 1. Chạy dịch âm thanh sang chữ
+        # 1. Chạy dịch âm thanh sang chữ\
+        asr_start = time.perf_counter()
         transcript = await speech_service.transcribe(audio_bytes)
+        asr_seconds = time.perf_counter() - asr_start
         
         # 2. Phân tích luật từ khóa Regex (luôn chạy để làm dự phòng/so sánh)
+        rule_start = time.perf_counter()
         rule_res = rule_service.rule_based_urgency_classify(transcript)
         rule_urgency = rule_res["urgency"]
         rule_confidence = rule_res["confidence"]
         rule_symptoms = rule_service.extract_symptoms(transcript)
+        rule_seconds = time.perf_counter() - rule_start
 
         # 3. Phân tích bằng LLM
+        llm_start = time.perf_counter()
         llm_res = await llm_service.analyze_transcript(transcript)
+        llm_seconds = time.perf_counter() - llm_start
         llm_urgency = llm_res["urgency"]
         llm_confidence = llm_res["confidence"]
         llm_symptoms = llm_res["symptoms"]
 
         # Thứ tự các mức độ khẩn cấp để so sánh
+        decision_start = time.perf_counter()
         urgency_order = {"LOW": 0, "MEDIUM": 1, "HIGH": 2, "CRITICAL": 3}
 
         # 4. Kiểm tra ngưỡng tin cậy (Confidence Threshold)
@@ -76,15 +84,28 @@ class TriageService:
         if not final_symptoms:
             final_symptoms = ["Chưa rõ triệu chứng"]
 
-        processing_time = time.time() - start_time
+        decision_seconds = time.perf_counter() - decision_start
         
         # Log hiệu năng chi tiết
-        logger.info(
-            f"[Triage Performance] EmergencyCallId: {call_id}, "
-            f"RequestId: {request_id}, "
-            f"Processing Time: {processing_time:.2f}s"
-        )
+        total_seconds = time.perf_counter() - total_start
 
+        logger.info(
+            "[Triage Performance] "
+            "EmergencyCallId=%s, "
+            "RequestId=%s, "
+            "ASR=%.2fs, "
+            "Rule=%.4fs, "
+            "LLM=%.2fs, "
+            "Decision=%.4fs, "
+            "Total=%.2fs",
+            call_id,
+            request_id,
+            asr_seconds,
+            rule_seconds,
+            llm_seconds,
+            decision_seconds,
+            total_seconds
+        )
         return AIAnalysisResult(
             transcript=transcript,
             urgency=final_urgency,

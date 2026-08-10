@@ -5,6 +5,7 @@ import logging
 import httpx
 import os
 import uuid
+import time
 from redis import Redis
 from dotenv import load_dotenv
 
@@ -76,6 +77,7 @@ async def process_queue():
             # BRPOP từ Redis queue (block 5 giây nếu hàng đợi trống)
             job = redis_client.brpop("emergency:ai:queue", timeout=5)
             if job:
+                total_start = time.perf_counter()
                 queue_name, message_bytes = job
                 message_str = message_bytes.decode("utf-8")
                 logger.info(f"Nhận được job từ hàng đợi: {message_str}")
@@ -92,22 +94,49 @@ async def process_queue():
                 request_id = str(uuid.uuid4())
                 
                 # 1. Tải audio file
+                download_start = time.perf_counter()
                 audio_bytes = await download_audio(audio_url)
+                download_seconds = (time.perf_counter() - download_start)
                 
                 # 2. Chạy dịch và phân loại bằng AI
+                ai_start = time.perf_counter()
                 result = await ai_service.analyze_voice_call(
                     audio_bytes,
                     call_id=call_id,
                     request_id=request_id
                 )
-                
+                ai_seconds = time.perf_counter() - ai_start
+
                 # 3. Gửi callback cập nhật dữ liệu về Spring Boot
+                callback_start = time.perf_counter()
                 await send_callback(
                     call_id=call_id,
                     transcript=result.transcript,
                     urgency=result.urgency,
                     confidence=result.confidence,
                     symptoms=result.symptoms
+                )
+                callback_seconds = (
+                    time.perf_counter() - callback_start
+                )
+
+                # Tổng thời gian end-to-end trong AI worker
+                total_seconds = (
+                    time.perf_counter() - total_start
+                )
+
+                logger.info(
+                    "[Worker Performance] "
+                    "CallId=%s, "
+                    "Download=%.2fs, "
+                    "AI=%.2fs, "
+                    "Callback=%.2fs, "
+                    "Total=%.2fs",
+                    call_id,
+                    download_seconds,
+                    ai_seconds,
+                    callback_seconds,
+                    total_seconds
                 )
 
                 

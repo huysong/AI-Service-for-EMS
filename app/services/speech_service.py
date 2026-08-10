@@ -16,7 +16,7 @@ def init_speech_model():
     try:
         from faster_whisper import WhisperModel
         logger.info("Đang tải mô hình faster-whisper (medium)...")
-        _whisper_model = WhisperModel("medium", device="cpu", compute_type="int8")
+        _whisper_model = WhisperModel("small", device="cpu", compute_type="int8")
         logger.info("Tải faster-whisper thành công!")
     except Exception as e:
         logger.error(f"Lỗi khi tải faster-whisper: {str(e)}")
