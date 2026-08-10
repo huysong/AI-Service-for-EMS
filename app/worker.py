@@ -20,7 +20,7 @@ logger = logging.getLogger("AIWorker")
 # Cấu hình Redis
 REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 REDIS_PORT = int(os.getenv("REDIS_PORT", 6379))
-redis_client = Redis(host=REDIS_HOST, port=REDIS_PORT, db=0)
+redis_client = Redis(host=REDIS_HOST, port=REDIS_PORT, db=0, socket_connect_timeout=5, socket_timeout=None, health_check_interval=30)
 
 # Cấu hình Callback URL về Spring Boot Backend
 SPRING_BOOT_CALLBACK_URL = os.getenv("SPRING_BOOT_CALLBACK_URL", "http://localhost:8080/api/v1/calls/callback")

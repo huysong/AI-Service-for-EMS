@@ -133,6 +133,11 @@ Dịch vụ này bao gồm FastAPI Web API và Background Worker để nhận di
    ```bash
    python app/worker.py
    ```
+   hoặc
+   ```bash
+   python -m app.worker
+   ```
+
    *Lần chạy đầu tiên, mô hình Speech-to-Text Whisper (`medium`) sẽ tự động được tải từ Hugging Face về máy (quá trình này mất khoảng vài phút).*
 
 ---
