@@ -53,29 +53,38 @@ class LLMService:
 
         try:
             system_prompt = self._load_prompt()
-            merged_content = f"{system_prompt}\n\nĐoạn hội thoại cuộc gọi cần phân tích:\n{transcript}"
             
             payload = {
-                "model": settings.LMSTUDIO_MODEL,
+                "model": settings.LLM_MODEL,
                 "messages": [
-                    {"role": "user", "content": merged_content}
+                    {
+                        "role": "system",
+                        "content": system_prompt
+                    },
+                    {
+                        "role": "user",
+                        "content": (
+                            "Đoạn hội thoại cuộc gọi cần phân tích:\n"
+                            f"{transcript}"
+                        )
+                    }
                 ],
-                "temperature": settings.LMSTUDIO_TEMPERATURE,
-                "max_tokens": settings.LMSTUDIO_MAX_TOKENS
+                "temperature": settings.LLM_TEMPERATURE,
+                "max_tokens": settings.LLM_MAX_TOKENS
             }
 
-            logger.info(f"Gửi yêu cầu phân tích sang LM Studio ({settings.LMSTUDIO_API_URL})...")
+            logger.info(f"Gửi yêu cầu phân tích sang LLM API ({settings.LLM_API_URL})...")
             
             async with httpx.AsyncClient() as client:
                 response = await client.post(
-                    settings.LMSTUDIO_API_URL,
+                    settings.LLM_API_URL,
                     json=payload,
                     headers={"Content-Type": "application/json"},
                     timeout=60.0
                 )
                 
                 if response.status_code != 200:
-                    raise Exception(f"LM Studio API trả về lỗi {response.status_code}: {response.text}")
+                    raise Exception(f"Lỗi phân loại bằng LLM: {response.status_code}: {response.text}")
                 
                 response_json = response.json()
                 content_str = response_json["choices"][0]["message"]["content"].strip()

@@ -2,6 +2,7 @@ import os
 import tempfile
 import logging
 import asyncio
+from app.core.config import settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("SpeechService")
@@ -15,13 +16,29 @@ def init_speech_model():
         return
     try:
         from faster_whisper import WhisperModel
-        logger.info("Đang tải mô hình faster-whisper (medium)...")
-        _whisper_model = WhisperModel("small", device="cpu", compute_type="int8")
-        logger.info("Tải faster-whisper thành công!")
+        logger.info(
+            "Đang tải mô hình faster-whisper (%s)...", settings.WHISPER_MODEL
+        )
+        _whisper_model = WhisperModel(
+            settings.WHISPER_MODEL ,
+            device="cpu", 
+            compute_type="int8"
+        )
+        logger.info(
+            "Tải faster-whisper (%s) thành công!",
+            settings.WHISPER_MODEL
+        )
+
     except Exception as e:
-        logger.error(f"Lỗi khi tải faster-whisper: {str(e)}")
+        logger.error(
+            "Lỗi khi tải faster-whisper: %s",
+            str(e),
+            exc_info=True
+        )
         _whisper_model = None
-    _models_loaded = True
+
+    finally:
+        _models_loaded = True
 
 class SpeechService:
     async def transcribe(self, audio_bytes: bytes) -> str:
@@ -50,7 +67,7 @@ class SpeechService:
                 logger.info(f"Kết quả dịch: {transcript}")
             else:
                 logger.warning("Không có Whisper model. Trả về text mặc định để triage.")
-                transcript = "Alo cấp cứu ạ! Ở đây có tai nạn giao thông nghiêm trọng, người bị bất tỉnh và chảy nhiều máu lắm!"
+                return ""
         except Exception as e:
             logger.error(f"Lỗi dịch giọng nói: {str(e)}")
             transcript = ""
