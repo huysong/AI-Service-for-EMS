@@ -64,6 +64,19 @@ async def send_callback(call_id: int, transcript: str, urgency: str, confidence:
             logger.error(f"Gửi callback thất bại. Chi tiết: {response.text}")
 
 
+async def send_heartbeat():
+    """
+    Gửi tín hiệu sống (heartbeat) lên Redis định kỳ (mỗi 5 giây, TTL 15s)
+    để Spring Boot backend biết AI Worker đang hoạt động bình thường.
+    """
+    logger.info(f"Bắt đầu gửi Heartbeat định kỳ 5s lên Redis {REDIS_HOST}:{REDIS_PORT} (key: ai:worker:heartbeat, TTL: 15s)...")
+    while True:
+        try:
+            redis_client.setex("ai:worker:heartbeat", 15, "alive")
+        except Exception as e:
+            logger.warning(f"Không thể gửi heartbeat lên Redis: {e}")
+        await asyncio.sleep(5)
+
 async def process_queue():
     """
     Vòng lặp vô hạn lắng nghe hàng đợi Redis và xử lý bằng các mô hình AI.
@@ -93,60 +106,80 @@ async def process_queue():
                 
                 request_id = str(uuid.uuid4())
                 
-                # 1. Tải audio file
-                download_start = time.perf_counter()
-                audio_bytes = await download_audio(audio_url)
-                download_seconds = (time.perf_counter() - download_start)
-                
-                # 2. Chạy dịch và phân loại bằng AI
-                ai_start = time.perf_counter()
-                result = await ai_service.analyze_voice_call(
-                    audio_bytes,
-                    call_id=call_id,
-                    request_id=request_id
-                )
-                ai_seconds = time.perf_counter() - ai_start
+                try:
+                    # 1. Tải audio file
+                    download_start = time.perf_counter()
+                    audio_bytes = await download_audio(audio_url)
+                    download_seconds = (time.perf_counter() - download_start)
+                    
+                    # 2. Chạy dịch và phân loại bằng AI
+                    ai_start = time.perf_counter()
+                    result = await ai_service.analyze_voice_call(
+                        audio_bytes,
+                        call_id=call_id,
+                        request_id=request_id
+                    )
+                    ai_seconds = time.perf_counter() - ai_start
 
-                # 3. Gửi callback cập nhật dữ liệu về Spring Boot
-                callback_start = time.perf_counter()
-                await send_callback(
-                    call_id=call_id,
-                    transcript=result.transcript,
-                    urgency=result.urgency,
-                    confidence=result.confidence,
-                    symptoms=result.symptoms
-                )
-                callback_seconds = (
-                    time.perf_counter() - callback_start
-                )
+                    # 3. Gửi callback cập nhật dữ liệu về Spring Boot
+                    callback_start = time.perf_counter()
+                    await send_callback(
+                        call_id=call_id,
+                        transcript=result.transcript,
+                        urgency=result.urgency,
+                        confidence=result.confidence,
+                        symptoms=result.symptoms
+                    )
+                    callback_seconds = (
+                        time.perf_counter() - callback_start
+                    )
 
-                # Tổng thời gian end-to-end trong AI worker
-                total_seconds = (
-                    time.perf_counter() - total_start
-                )
+                    # Tổng thời gian end-to-end trong AI worker
+                    total_seconds = (
+                        time.perf_counter() - total_start
+                    )
 
-                logger.info(
-                    "[Worker Performance] "
-                    "CallId=%s, "
-                    "Download=%.2fs, "
-                    "AI=%.2fs, "
-                    "Callback=%.2fs, "
-                    "Total=%.2fs",
-                    call_id,
-                    download_seconds,
-                    ai_seconds,
-                    callback_seconds,
-                    total_seconds
-                )
-
+                    logger.info(
+                        "[Worker Performance] "
+                        "CallId=%s, "
+                        "Download=%.2fs, "
+                        "AI=%.2fs, "
+                        "Callback=%.2fs, "
+                        "Total=%.2fs",
+                        call_id,
+                        download_seconds,
+                        ai_seconds,
+                        callback_seconds,
+                        total_seconds
+                    )
+                except Exception as job_err:
+                    logger.error(f"Lỗi khi xử lý job cho cuộc gọi #{call_id}: {job_err}", exc_info=True)
+                    # Gửi fallback callback về Spring Boot để ca không bị mất tích
+                    try:
+                        logger.info(f"Đang gửi fallback callback về Spring Boot cho cuộc gọi #{call_id}...")
+                        await send_callback(
+                            call_id=call_id,
+                            transcript=f"[Lỗi xử lý AI: {str(job_err)}]",
+                            urgency="MEDIUM",
+                            confidence=0.0,
+                            symptoms=["Lỗi phân tích AI - Cần thẩm định thủ công"]
+                        )
+                    except Exception as cb_err:
+                        logger.error(f"Không thể gửi fallback callback về Spring Boot: {cb_err}")
                 
         except Exception as e:
             logger.error(f"Lỗi trong vòng lặp Worker: {str(e)}", exc_info=True)
             # Tránh lặp lỗi quá nhanh làm tràn log
             await asyncio.sleep(2)
 
+async def main():
+    await asyncio.gather(
+        send_heartbeat(),
+        process_queue()
+    )
+
 if __name__ == "__main__":
     try:
-        asyncio.run(process_queue())
+        asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Worker dừng hoạt động bởi người dùng.")
